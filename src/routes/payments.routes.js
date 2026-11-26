@@ -102,6 +102,54 @@ router.post(
 )
 
 /**
+ * POST /api/payments/verify
+ * Fallback for local development where the Stripe webhook cannot reach the
+ * server. The browser returns from Stripe with a session id; we retrieve the
+ * session directly from Stripe (never trusting the client) and mark the
+ * appointment paid when Stripe reports it as paid.
+ *
+ * This is idempotent: handleSuccessfulPayment returns early when a
+ * transaction for the session already exists.
+ */
+router.post(
+  "/verify",
+  requireAuth,
+  requireCustomer,
+  asyncHandler(async (req, res) => {
+    const sessionId = String(req.body?.sessionId ?? "").trim()
+
+    if (!sessionId.startsWith("cs_")) {
+      throw badRequest("That checkout session is not valid.")
+    }
+
+    const stripe = getStripe()
+    let session
+
+    try {
+      session = await stripe.checkout.sessions.retrieve(sessionId)
+    } catch {
+      throw notFoundError("We could not find that checkout session.")
+    }
+
+    if (String(session.metadata?.customerId) !== req.user.id) {
+      throw forbidden("This payment does not belong to you.")
+    }
+
+    if (session.payment_status === "paid") {
+      await handleSuccessfulPayment(session)
+    }
+
+    res.json({
+      success: true,
+      status: session.payment_status ?? "unpaid",
+      appointmentId: session.metadata?.appointmentId ?? null,
+      amountTotal: Number(session.amount_total ?? 0) / 100,
+      currency: session.currency ?? "usd",
+    })
+  })
+)
+
+/**
  * POST /api/payments/webhook
  * The only place payment status is flipped to "paid": the signature is
  * verified against STRIPE_WEBHOOK_SECRET first.

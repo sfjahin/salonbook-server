@@ -16,14 +16,25 @@ const app = express()
 const port = process.env.PORT || 5000
 
 // Allowed browser origins: CLIENT_URL accepts a comma separated list.
+// During local development any origin is allowed so localhost, 127.0.0.1 and
+// LAN addresses all work; production stays restricted to CLIENT_URL.
 const allowedOrigins = (process.env.CLIENT_URL || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean)
 
+const isDevelopment = process.env.NODE_ENV !== "production"
+
 app.use(
   cors({
-    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
+    origin(origin, callback) {
+      // Same-origin or non-browser requests have no Origin header.
+      if (!origin) return callback(null, true)
+      if (isDevelopment || allowedOrigins.includes(origin)) {
+        return callback(null, true)
+      }
+      return callback(null, false)
+    },
     credentials: true,
   })
 )
